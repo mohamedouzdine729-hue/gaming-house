@@ -715,7 +715,232 @@ renderStations = function() {
   });
 };
 
+
+const previousExtraRender = renderStations;
+
+const extraArea = document.createElement("section");
+
+extraArea.innerHTML = `
+<h2>Temps supplémentaire</h2>
+<p id="extraMessage" role="status"></p>
+<div id="extraRequests"></div>
+`;
+
+area.appendChild(extraArea);
+
+let extraBusy = false;
+
+async function requestExtraTime(sessionId, minutes) {
+  await executeSessionAction(() =>
+    db.rpc("request_extra_time", {
+      p_session_id: sessionId,
+      p_minutes: minutes
+    })
+  );
+
+  await loadExtraRequests();
+}
+
+async function reviewExtraTime(requestId, approve) {
+  const message = approve
+    ? "Accepter la demande pour 2 DH ?"
+    : "Refuser cette demande ?";
+
+  if (!confirm(message)) return;
+
+  await executeSessionAction(() =>
+    db.rpc("review_extra_time", {
+      p_request_id: requestId,
+      p_approve: approve
+    })
+  );
+
+  await loadExtraRequests();
+}
+
+renderStations = function() {
+  previousExtraRender();
+
+  if (currentRole !== "player") return;
+
+  const cards = document.querySelectorAll(
+    "#stations .station"
+  );
+
+  stationList.forEach((station, index) => {
+    const session = activeSessions.find(
+      s => s.station_id === station.id
+    );
+
+    if (!session || !cards[index]) return;
+
+    const select = document.createElement("select");
+
+    select.style.cssText = `
+      width: 100%;
+      padding: 12px;
+      margin-top: 15px;
+      background: #101018;
+      color: white;
+      border: 1px solid #444455;
+      border-radius: 8px;
+    `;
+
+    [15, 30, 60].forEach(minutes => {
+      const option = document.createElement("option");
+
+      option.value = minutes;
+      option.textContent =
+        "+" + minutes + " min — 2 DH";
+
+      select.appendChild(option);
+    });
+
+    cards[index].appendChild(select);
+
+    addStationButton(
+      cards[index],
+      "Demander Extra Time",
+      "#7655dc",
+      () => requestExtraTime(
+        session.id,
+        Number(select.value)
+      )
+    );
+  });
+};
+
+async function loadExtraRequests() {
+  if (dashboard.hidden || !currentRole || extraBusy) {
+    return;
+  }
+
+  extraBusy = true;
+
+  const container =
+    document.getElementById("extraRequests");
+
+  const info =
+    document.getElementById("extraMessage");
+
+  try {
+    let query = db
+      .from("extra_time_requests")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (currentRole === "owner") {
+      query = query.eq("status", "pending");
+    }
+
+    const { data, error } = await query.limit(30);
+
+    if (error) throw error;
+
+    container.replaceChildren();
+
+    if (!data || data.length === 0) {
+      info.textContent =
+        currentRole === "owner"
+        ? "Aucune demande en attente."
+        : "Aucune demande récente.";
+
+      return;
+    }
+
+    info.textContent = "";
+
+    data.forEach(request => {
+      const card = document.createElement("article");
+
+      card.className = "station";
+      card.style.marginBottom = "12px";
+
+      const session = activeSessions.find(
+        s => s.id === request.session_id
+      );
+
+      const station = session
+        ? stationList.find(
+            s => s.id === session.station_id
+          )
+        : null;
+
+      const heading = document.createElement("h3");
+
+      heading.textContent = station
+        ? station.name ||
+          "Poste " + station.station_number
+        : "Demande Extra Time";
+
+      const details = document.createElement("p");
+
+      details.textContent =
+        "+" + request.requested_minutes +
+        " minutes — 2 DH si acceptée";
+
+      const status = document.createElement("p");
+
+      const labels = {
+        pending: "En attente",
+        approved: "Acceptée",
+        rejected: "Refusée"
+      };
+
+      const colors = {
+        pending: "#fbbf24",
+        approved: "#4ade80",
+        rejected: "#f87171"
+      };
+
+      status.textContent =
+        labels[request.status] || request.status;
+
+      status.style.color =
+        colors[request.status] || "white";
+
+      card.append(heading, details, status);
+
+      if (
+        currentRole === "owner" &&
+        request.status === "pending"
+      ) {
+        addStationButton(
+          card,
+          "✓ Accepter",
+          "#166534",
+          () => reviewExtraTime(request.id, true)
+        );
+
+        addStationButton(
+          card,
+          "✕ Refuser",
+          "#991b1b",
+          () => reviewExtraTime(request.id, false)
+        );
+      }
+
+      container.appendChild(card);
+    });
+
+  } catch (error) {
+    info.textContent = "Erreur : " + error.message;
+  } finally {
+    extraBusy = false;
+  }
+}
+
+const previousExtraDashboard = showDashboard;
+
+showDashboard = async function(user) {
+  await previousExtraDashboard(user);
+  await loadExtraRequests();
+};
+
+setInterval(loadExtraRequests, 5000);
+
 restoreSession();
+
 
 </script>
 
