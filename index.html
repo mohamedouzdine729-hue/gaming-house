@@ -224,6 +224,285 @@ async function restoreSession() {
   }
 }
 
+
+const originalShowDashboard = showDashboard;
+
+const style = document.createElement("style");
+style.textContent = `
+#dashboard {
+  max-width: 1200px;
+  margin: 25px auto;
+}
+.stats, .stations {
+  display: grid;
+  grid-template-columns:
+    repeat(auto-fit, minmax(200px, 1fr));
+  gap: 15px;
+  margin: 20px 0;
+}
+.stat, .station {
+  background: #101018;
+  border: 1px solid #333344;
+  border-radius: 14px;
+  padding: 20px;
+}
+.stat strong {
+  display: block;
+  font-size: 28px;
+  margin-top: 12px;
+}
+.station h3 {
+  margin-top: 0;
+}
+.timer {
+  font-size: 30px;
+  font-weight: bold;
+  margin: 15px 0;
+  font-variant-numeric: tabular-nums;
+}
+.available { color: #4ade80; }
+.occupied { color: #f87171; }
+.paused { color: #fbbf24; }
+`;
+document.head.appendChild(style);
+
+const area = document.createElement("section");
+area.innerHTML = `
+<h2>Tableau de bord</h2>
+
+<div class="stats" id="stats">
+  <div class="stat">
+    Revenus du jour
+    <strong id="revenue">—</strong>
+  </div>
+  <div class="stat">
+    Postes occupés
+    <strong id="occupied">—</strong>
+  </div>
+  <div class="stat">
+    Sessions du jour
+    <strong id="sessionCount">—</strong>
+  </div>
+  <div class="stat">
+    Extra Time du jour
+    <strong id="extraCount">—</strong>
+  </div>
+</div>
+
+<h2>Gestion des stations</h2>
+<p id="stationMessage" role="status"></p>
+<div class="stations" id="stations"></div>
+`;
+
+dashboard.insertBefore(
+  area,
+  document.getElementById("logoutButton")
+);
+
+let currentRole = null;
+let activeSessions = [];
+let stationList = [];
+let refreshBusy = false;
+
+function formatTime(seconds) {
+  seconds = Math.max(0, Math.ceil(seconds));
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor(seconds % 3600 / 60);
+  const s = seconds % 60;
+
+  return [h, m, s]
+    .map(n => String(n).padStart(2, "0"))
+    .join(":");
+}
+
+function remainingTime(session) {
+  const end = session.status === "paused"
+    ? new Date(session.paused_at).getTime()
+    : Date.now();
+
+  const elapsed =
+    (end - new Date(session.started_at).getTime()) / 1000
+    - Number(session.total_paused_seconds || 0);
+
+  const duration =
+    (Number(session.base_duration_minutes || 60)
+    + Number(session.extra_time_minutes || 0)) * 60;
+
+  return formatTime(duration - elapsed);
+}
+
+function renderStations() {
+  const container = document.getElementById("stations");
+  container.replaceChildren();
+
+  stationList.forEach(station => {
+    const session = activeSessions.find(
+      s => s.station_id === station.id
+    );
+
+    const card = document.createElement("article");
+    card.className = "station";
+
+    const title = document.createElement("h3");
+    title.textContent =
+      "🎮 " + (station.name ||
+      "Poste " + station.station_number);
+
+    const status = document.createElement("p");
+
+    if (!station.is_active) {
+      status.textContent = "● Hors service";
+    } else if (session?.status === "paused") {
+      status.textContent = "● En pause";
+      status.className = "paused";
+    } else if (session) {
+      status.textContent = "● Occupé";
+      status.className = "occupied";
+    } else if (currentRole === "owner") {
+      status.textContent = "● Disponible";
+      status.className = "available";
+    } else {
+      status.textContent = "Disponibilité non vérifiée";
+    }
+
+    const timer = document.createElement("div");
+    timer.className = "timer";
+    timer.textContent = session
+      ? remainingTime(session)
+      : "--:--:--";
+
+    if (session) {
+      timer.dataset.sessionId = session.id;
+    }
+
+    const price = document.createElement("p");
+    price.textContent = "30 DH / 60 min";
+
+    card.append(title, status, timer, price);
+    container.appendChild(card);
+  });
+}
+
+async function loadDashboard() {
+  if (refreshBusy || dashboard.hidden || !currentRole) {
+    return;
+  }
+
+  refreshBusy = true;
+  const info = document.getElementById("stationMessage");
+
+  try {
+    const [stations, sessions] = await Promise.all([
+      db.from("stations")
+        .select("*")
+        .order("station_number"),
+
+      db.from("sessions")
+        .select("*")
+        .in("status", ["running", "paused"])
+    ]);
+
+    if (stations.error) throw stations.error;
+    if (sessions.error) throw sessions.error;
+
+    stationList = stations.data || [];
+    activeSessions = sessions.data || [];
+
+    renderStations();
+
+    if (currentRole === "owner") {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const [daily, completed, extras] =
+        await Promise.all([
+          db.from("sessions")
+            .select("id", { count: "exact", head: true })
+            .gte("started_at", today.toISOString()),
+
+          db.from("sessions")
+            .select("total_amount")
+            .eq("status", "completed")
+            .gte("ended_at", today.toISOString()),
+
+          db.from("extra_time_requests")
+            .select("id", { count: "exact", head: true })
+            .eq("status", "approved")
+            .gte("reviewed_at", today.toISOString())
+        ]);
+
+      if (daily.error) throw daily.error;
+      if (completed.error) throw completed.error;
+      if (extras.error) throw extras.error;
+
+      const revenue = (completed.data || [])
+        .reduce((sum, s) =>
+          sum + Number(s.total_amount || 0), 0);
+
+      document.getElementById("revenue").textContent =
+        revenue.toFixed(2) + " DH";
+
+      document.getElementById("occupied").textContent =
+        new Set(activeSessions.map(s => s.station_id)).size
+        + " / " + stationList.length;
+
+      document.getElementById("sessionCount").textContent =
+        daily.count || 0;
+
+      document.getElementById("extraCount").textContent =
+        extras.count || 0;
+    }
+
+    info.textContent = "";
+
+  } catch (error) {
+    info.textContent = "Erreur : " + error.message;
+  } finally {
+    refreshBusy = false;
+  }
+}
+
+showDashboard = async function(user) {
+  await originalShowDashboard(user);
+
+  const { data, error } = await db
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .single();
+
+  if (error) {
+    dashboard.hidden = true;
+    login.hidden = false;
+    await db.auth.signOut();
+    throw error;
+  }
+
+  currentRole = data.role;
+
+  document.getElementById("stats").hidden =
+    currentRole !== "owner";
+
+  await loadDashboard();
+};
+
+setInterval(() => {
+  if (dashboard.hidden) return;
+
+  document.querySelectorAll("[data-session-id]")
+    .forEach(element => {
+      const session = activeSessions.find(
+        s => s.id === element.dataset.sessionId
+      );
+
+      if (session) {
+        element.textContent = remainingTime(session);
+      }
+    });
+}, 1000);
+
+setInterval(loadDashboard, 10000);
+
 restoreSession();
 </script>
 
