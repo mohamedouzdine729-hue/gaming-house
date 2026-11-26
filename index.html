@@ -503,7 +503,220 @@ setInterval(() => {
 
 setInterval(loadDashboard, 10000);
 
+
+const previousRenderStations = renderStations;
+
+let sessionActionBusy = false;
+
+async function executeSessionAction(action) {
+  if (sessionActionBusy) return;
+
+  sessionActionBusy = true;
+
+  const info =
+    document.getElementById("stationMessage");
+
+  info.textContent = "Opération en cours...";
+
+  try {
+    const { error } = await action();
+
+    if (error) throw error;
+
+    await loadDashboard();
+
+  } catch (error) {
+    info.textContent = "Erreur : " + error.message;
+    alert(error.message);
+  } finally {
+    sessionActionBusy = false;
+  }
+}
+
+async function startStation(stationId, playerId) {
+  await executeSessionAction(() =>
+    db.rpc("start_session", {
+      p_station_id: stationId,
+      p_player_id: playerId
+    })
+  );
+}
+
+async function controlStation(sessionId, action) {
+  if (action === "stop") {
+    const confirmed = confirm(
+      "Terminer cette session ? Le tarif de base est de 30 DH."
+    );
+
+    if (!confirmed) return;
+  }
+
+  await executeSessionAction(() =>
+    db.rpc("control_session", {
+      p_session_id: sessionId,
+      p_action: action
+    })
+  );
+}
+
+async function choosePlayer(stationId) {
+  const { data, error } = await db
+    .from("profiles")
+    .select("id, username, display_name")
+    .eq("role", "player")
+    .order("username");
+
+  if (error) {
+    alert(error.message);
+    return;
+  }
+
+  if (!data || data.length === 0) {
+    alert("Aucun joueur disponible.");
+    return;
+  }
+
+  const dialog = document.createElement("dialog");
+
+  dialog.style.cssText = `
+    background: #1c1c28;
+    color: white;
+    border: 1px solid #444455;
+    border-radius: 15px;
+    padding: 25px;
+    width: 90%;
+    max-width: 400px;
+  `;
+
+  const heading = document.createElement("h2");
+  heading.textContent = "Choisir un joueur";
+
+  const select = document.createElement("select");
+
+  select.style.cssText = `
+    width: 100%;
+    padding: 15px;
+    border-radius: 8px;
+    background: #101018;
+    color: white;
+  `;
+
+  data.forEach(player => {
+    const option = document.createElement("option");
+
+    option.value = player.id;
+    option.textContent =
+      player.display_name || player.username || player.id;
+
+    select.appendChild(option);
+  });
+
+  const start = document.createElement("button");
+  start.textContent = "Démarrer — 30 DH";
+
+  start.onclick = async () => {
+    const playerId = select.value;
+    dialog.close();
+    await startStation(stationId, playerId);
+  };
+
+  const cancel = document.createElement("button");
+  cancel.textContent = "Annuler";
+  cancel.style.background = "#444455";
+
+  cancel.onclick = () => dialog.close();
+
+  dialog.addEventListener("close", () => {
+    dialog.remove();
+  });
+
+  dialog.append(heading, select, start, cancel);
+
+  document.body.appendChild(dialog);
+  dialog.showModal();
+}
+
+function addStationButton(card, label, color, action) {
+  const button = document.createElement("button");
+
+  button.textContent = label;
+  button.style.background = color;
+  button.style.marginTop = "8px";
+
+  button.onclick = action;
+
+  card.appendChild(button);
+}
+
+renderStations = function() {
+  previousRenderStations();
+
+  const cards = document.querySelectorAll(
+    "#stations .station"
+  );
+
+  stationList.forEach((station, index) => {
+    const card = cards[index];
+
+    if (!card) return;
+
+    const session = activeSessions.find(
+      s => s.station_id === station.id
+    );
+
+    if (!session && station.is_active) {
+      if (currentRole === "owner") {
+        addStationButton(
+          card,
+          "▶ Démarrer",
+          "#166534",
+          () => choosePlayer(station.id)
+        );
+      }
+
+      return;
+    }
+
+    if (!session) return;
+
+    const amount = document.createElement("p");
+
+    amount.textContent =
+      "Total : " +
+      (30 + Number(session.extra_time_amount || 0))
+      .toFixed(2) + " DH";
+
+    card.appendChild(amount);
+
+    if (session.status === "running") {
+      addStationButton(
+        card,
+        "⏸ Pause",
+        "#92400e",
+        () => controlStation(session.id, "pause")
+      );
+    }
+
+    if (session.status === "paused") {
+      addStationButton(
+        card,
+        "▶ Reprendre",
+        "#4338ca",
+        () => controlStation(session.id, "resume")
+      );
+    }
+
+    addStationButton(
+      card,
+      "■ Terminer",
+      "#991b1b",
+      () => controlStation(session.id, "stop")
+    );
+  });
+};
+
 restoreSession();
+
 </script>
 
 </body>
