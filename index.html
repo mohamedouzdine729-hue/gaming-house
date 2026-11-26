@@ -1,1 +1,117 @@
 
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GAMING HOUSE PRO</title>
+
+<style>
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  background: #101018;
+  color: white;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.login {
+  width: 92%;
+  max-width: 420px;
+  padding: 35px;
+  background: #1c1c28;
+  border: 1px solid #333344;
+  border-radius: 18px;
+  text-align: center;
+}
+.logo {
+  font-size: 55px;
+}
+h1 {
+  font-size: 27px;
+  margin-bottom: 8px;
+}
+p {
+  color: #aaaabb;
+}
+input {
+  width: 100%;
+  padding: 15px;
+  margin: 8px 0;
+  background: #101018;
+  color: white;
+  border: 1px solid #444455;
+  border-radius: 8px;
+  font-size: 16px;
+}
+button {
+  width: 100%;
+  padding: 15px;
+  margin-top: 15px;
+  background: #7655dc;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 16px;
+  cursor: pointer;
+}
+button:hover {
+  opacity: 0.85;
+}
+#message {
+  font-size: 14px;
+  color: #fbbf24;
+}
+.footer {
+  margin-top: 25px;
+  font-size: 12px;
+  color: #888899;
+}
+</style>
+</head>
+
+<body>
+
+<div class="login">
+  <div class="logo">🎮</div>
+  <h1>GAMING HOUSE PRO</h1>
+  <p>Bienvenue dans votre espace gaming</p>
+
+  <form id="loginForm">
+    <input type="email" id="email"
+      placeholder="Adresse e-mail" required>
+
+    <input type="password" id="password"
+      placeholder="Mot de passe" required>
+
+    <button type="submit">Se connecter</button>
+  </form>
+
+  <p id="message" role="status"></p>
+
+  <div class="footer">
+    GAMING HOUSE PRO © 2026
+    <br>
+    Système de gestion gaming
+  </div>
+</div>
+
+<script>
+document.getElementById("loginForm")
+.addEventListener("submit", function(event) {
+  event.preventDefault();
+
+  document.getElementById("message")
+  .textContent =
+  "Connexion Supabase en cours de configuration.";
+});
+</script>
+
+</body>
+</html>
+
