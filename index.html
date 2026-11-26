@@ -6,6 +6,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>GAMING HOUSE PRO</title>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
 <style>
 * {
   box-sizing: border-box;
@@ -20,7 +22,7 @@ body {
   align-items: center;
   justify-content: center;
 }
-.login {
+.panel {
   width: 92%;
   max-width: 420px;
   padding: 35px;
@@ -34,7 +36,6 @@ body {
 }
 h1 {
   font-size: 27px;
-  margin-bottom: 8px;
 }
 p {
   color: #aaaabb;
@@ -60,8 +61,8 @@ button {
   font-size: 16px;
   cursor: pointer;
 }
-button:hover {
-  opacity: 0.85;
+button:disabled {
+  opacity: 0.5;
 }
 #message {
   font-size: 14px;
@@ -72,24 +73,31 @@ button:hover {
   font-size: 12px;
   color: #888899;
 }
+[hidden] {
+  display: none !important;
+}
 </style>
 </head>
 
 <body>
 
-<div class="login">
+<div class="panel" id="login">
   <div class="logo">🎮</div>
   <h1>GAMING HOUSE PRO</h1>
   <p>Bienvenue dans votre espace gaming</p>
 
   <form id="loginForm">
     <input type="email" id="email"
-      placeholder="Adresse e-mail" required>
+      placeholder="Adresse e-mail"
+      autocomplete="email" required>
 
     <input type="password" id="password"
-      placeholder="Mot de passe" required>
+      placeholder="Mot de passe"
+      autocomplete="current-password" required>
 
-    <button type="submit">Se connecter</button>
+    <button type="submit" id="loginButton">
+      Se connecter
+    </button>
   </form>
 
   <p id="message" role="status"></p>
@@ -101,17 +109,123 @@ button:hover {
   </div>
 </div>
 
+<div class="panel" id="dashboard" hidden>
+  <div class="logo">🎮</div>
+  <h1>GAMING HOUSE PRO</h1>
+  <h2 id="welcome"></h2>
+  <p id="role"></p>
+  <p>Connexion Supabase réussie.</p>
+  <button id="logoutButton">
+    Se déconnecter
+  </button>
+  <p id="dashboardMessage" role="status"></p>
+</div>
+
 <script>
+const SUPABASE_URL =
+  "https://dsmxfszbcrucvlieqntp.supabase.co";
+
+const SUPABASE_KEY =
+  "sb_publishable_ZC6136Few5cmJZJ-SHG-gQ_KDEzDWQT";
+
+const db = window.supabase.createClient(
+  SUPABASE_URL,
+  SUPABASE_KEY
+);
+
+const login = document.getElementById("login");
+const dashboard = document.getElementById("dashboard");
+const message = document.getElementById("message");
+const loginButton = document.getElementById("loginButton");
+
+async function showDashboard(user) {
+  const { data: profile, error } = await db
+    .from("profiles")
+    .select("display_name, username, role")
+    .eq("id", user.id)
+    .single();
+
+  if (error || !profile) {
+    await db.auth.signOut();
+    throw new Error("Profil introuvable ou inaccessible.");
+  }
+
+  if (!["owner", "player"].includes(profile.role)) {
+    await db.auth.signOut();
+    throw new Error("Rôle non autorisé.");
+  }
+
+  document.getElementById("welcome").textContent =
+    "Bienvenue, " +
+    (profile.display_name || profile.username || "Utilisateur");
+
+  document.getElementById("role").textContent =
+    profile.role === "owner"
+      ? "Espace Administrateur"
+      : "Espace Joueur";
+
+  login.hidden = true;
+  dashboard.hidden = false;
+}
+
 document.getElementById("loginForm")
-.addEventListener("submit", function(event) {
+.addEventListener("submit", async function(event) {
   event.preventDefault();
 
-  document.getElementById("message")
-  .textContent =
-  "Connexion Supabase en cours de configuration.";
+  loginButton.disabled = true;
+  message.textContent = "Connexion en cours...";
+
+  try {
+    const { data, error } =
+      await db.auth.signInWithPassword({
+        email: document.getElementById("email").value.trim(),
+        password: document.getElementById("password").value
+      });
+
+    if (error) throw error;
+
+    await showDashboard(data.user);
+    message.textContent = "";
+    document.getElementById("password").value = "";
+
+  } catch (error) {
+    message.textContent = error.message;
+  } finally {
+    loginButton.disabled = false;
+  }
 });
+
+document.getElementById("logoutButton")
+.addEventListener("click", async function() {
+  const { error } = await db.auth.signOut();
+
+  if (error) {
+    document.getElementById("dashboardMessage")
+      .textContent = error.message;
+    return;
+  }
+
+  dashboard.hidden = true;
+  login.hidden = false;
+  message.textContent = "";
+});
+
+async function restoreSession() {
+  try {
+    const { data, error } = await db.auth.getSession();
+
+    if (error) throw error;
+
+    if (data.session) {
+      await showDashboard(data.session.user);
+    }
+  } catch (error) {
+    message.textContent = error.message;
+  }
+}
+
+restoreSession();
 </script>
 
 </body>
 </html>
-
